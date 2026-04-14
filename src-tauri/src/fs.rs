@@ -174,13 +174,13 @@ pub async fn write_file_content(path: String, content: String, project_path: Str
 
 #[tauri::command]
 pub async fn list_project_files(project_path: String) -> Result<Vec<String>, String> {
-    let tracked = std::process::Command::new("git")
+    let tracked = crate::command_no_window("git")
         .args(["-c", "core.quotePath=false", "ls-files"])
         .current_dir(&project_path)
         .output()
         .map_err(|e| e.to_string())?;
 
-    let untracked = std::process::Command::new("git")
+    let untracked = crate::command_no_window("git")
         .args(["-c", "core.quotePath=false", "ls-files", "--others", "--exclude-standard"])
         .current_dir(&project_path)
         .output()

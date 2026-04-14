@@ -18,6 +18,20 @@ mod usage;
 
 use session::{ClaudeSessionInfo, CodexSessionInfo};
 
+/// 创建不弹出控制台窗口的 Command。
+/// Windows 上设置 CREATE_NO_WINDOW (0x08000000) 标志，
+/// 防止 cmd.exe / git 等控制台程序产生可见窗口。
+pub(crate) fn command_no_window(program: &str) -> std::process::Command {
+    #[allow(unused_mut)]
+    let mut cmd = std::process::Command::new(program);
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    cmd
+}
+
 pub struct TaskManager {
     pub(crate) pty_masters: Mutex<HashMap<String, Box<dyn portable_pty::MasterPty + Send>>>,
     pub(crate) pty_writers: Mutex<HashMap<String, Box<dyn Write + Send>>>,
@@ -46,6 +60,17 @@ impl TaskManager {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Windows: 将控制台代码页设为 UTF-8，使 ConPTY 子进程继承 UTF-8 编码
+    #[cfg(target_os = "windows")]
+    unsafe {
+        extern "system" {
+            fn SetConsoleOutputCP(wCodePageID: u32) -> i32;
+            fn SetConsoleCP(wCodePageID: u32) -> i32;
+        }
+        SetConsoleOutputCP(65001);
+        SetConsoleCP(65001);
+    }
+
     tauri::Builder::default()
         .setup(|_app| {
             // 后台预热 login shell 环境，避免第一次启动任务时阻塞

@@ -34,7 +34,7 @@ fn run_git<S: AsRef<std::ffi::OsStr>>(
 ) -> Result<std::process::Output, String> {
     validate_project_path(project_path)?;
 
-    std::process::Command::new("git")
+    crate::command_no_window("git")
         .args(args)
         .current_dir(project_path)
         .output()
@@ -51,7 +51,7 @@ async fn run_git_with_timeout(
 ) -> Result<std::process::Output, String> {
     tokio::time::timeout(timeout, tokio::task::spawn_blocking(move || {
         validate_project_path(&project_path)?;
-        std::process::Command::new("git")
+        crate::command_no_window("git")
             .args(&args)
             .current_dir(&project_path)
             .output()
@@ -78,7 +78,6 @@ fn run_git_check<S: AsRef<std::ffi::OsStr>>(
 
 #[tauri::command]
 pub async fn generate_commit_message(project_path: String) -> Result<String, String> {
-    use std::process::Command;
 
     // 1. Get staged diff
     let diff_output = run_git(&project_path, &["diff", "--staged"])?;
@@ -143,7 +142,7 @@ pub async fn generate_commit_message(project_path: String) -> Result<String, Str
         tokio::task::spawn_blocking(move || {
             if agent == "codex" {
                 // codex exec runs in non-interactive mode without requiring a TTY
-                let mut cmd = Command::new("codex");
+                let mut cmd = crate::command_no_window("codex");
                 cmd.args(["exec", &full_prompt])
                     .env("PATH", &full_path)
                     .current_dir(&project_path);
@@ -156,7 +155,7 @@ pub async fn generate_commit_message(project_path: String) -> Result<String, Str
                     .map_err(|e| format!("Failed to run codex: {}", e))
             } else {
                 // claude -p runs in non-interactive print mode; prompt is a positional arg
-                let mut cmd = Command::new("claude");
+                let mut cmd = crate::command_no_window("claude");
                 cmd.args(["-p", &full_prompt, "--output-format", "text"])
                     .env("PATH", &full_path)
                     .current_dir(&project_path);

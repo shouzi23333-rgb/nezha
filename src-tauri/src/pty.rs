@@ -149,6 +149,16 @@ fn setup_env(cmd: &mut CommandBuilder) {
     // 设置终端类型，使 Claude Code / Codex 输出正确的转义序列
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
+
+    // Windows: 通过环境变量引导子进程使用 UTF-8 编码
+    #[cfg(target_os = "windows")]
+    {
+        // Python 子进程强制 UTF-8
+        cmd.env("PYTHONUTF8", "1");
+        cmd.env("PYTHONIOENCODING", "utf-8");
+        // Node.js (Claude Code / Codex 底层) 使用 ICU full
+        cmd.env("NODE_ICU_DATA", "");
+    }
 }
 
 /// 将 PTY master/writer/child 注册到 TaskManager 的三个 HashMap 中。
@@ -345,6 +355,7 @@ fn spawn_exit_monitor(app: AppHandle, task_id: String, project_path: String, is_
 /// 创建智能体命令的 CommandBuilder。
 /// Windows 上 `.cmd`/`.bat` 脚本无法被 CreateProcessW 直接执行，
 /// 需要通过 `cmd.exe /C` 包装；`.exe` 和其它平台直接使用原始路径。
+/// 编码由进程级 SetConsoleOutputCP(65001)（lib.rs）和环境变量（setup_env）保证。
 fn new_agent_command(agent_bin: &str) -> CommandBuilder {
     #[cfg(target_os = "windows")]
     {
@@ -352,6 +363,7 @@ fn new_agent_command(agent_bin: &str) -> CommandBuilder {
             let ext_lower = ext.to_string_lossy().to_lowercase();
             if ext_lower == "cmd" || ext_lower == "bat" {
                 let mut c = CommandBuilder::new("cmd.exe");
+                c.arg("/D"); // 禁用 AutoRun 注册表命令，避免意外干扰
                 c.arg("/C");
                 c.arg(agent_bin);
                 return c;
@@ -690,7 +702,7 @@ pub async fn open_shell(
 
     let shell = if cfg!(target_os = "windows") {
         // Win10+ 自带 powershell (5.1)；若用户装了 pwsh (7+) 则优先使用
-        if std::process::Command::new("pwsh").arg("--version").output().is_ok() {
+        if crate::command_no_window("pwsh").arg("--version").output().is_ok() {
             "pwsh".to_string()
         } else {
             "powershell".to_string()
@@ -699,6 +711,15 @@ pub async fn open_shell(
         std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string())
     };
     let mut cmd = CommandBuilder::new(&shell);
+    if cfg!(target_os = "windows") {
+        // 抑制用户 profile 加载（避免 fnm / nvm 等工具的错误输出污染终端）
+        cmd.arg("-NoProfile");
+        cmd.arg("-NoLogo");
+        // 设置 UTF-8 编码后保持交互式会话
+        cmd.arg("-NoExit");
+        cmd.arg("-Command");
+        cmd.arg("[Console]::OutputEncoding = [Console]::InputEncoding = [Text.Encoding]::UTF8");
+    }
     cmd.cwd(&project_path);
     setup_env(&mut cmd);
 

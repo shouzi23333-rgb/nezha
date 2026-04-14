@@ -220,7 +220,7 @@ fn detect_path(binary: &str) -> String {
     let shell_path = get_login_shell_path();
 
     let which_cmd = if cfg!(target_os = "windows") { "where" } else { "which" };
-    let output = Command::new(which_cmd)
+    let output = crate::command_no_window(which_cmd)
         .arg(binary)
         .env("PATH", shell_path)
         .output();
@@ -335,7 +335,7 @@ pub fn detect_agent_paths() -> Result<AppSettings, String> {
 ///   "Codex v0.1.2025"        →  "0.1.2025"
 fn detect_version(binary: &str) -> Option<String> {
     let shell_path = get_login_shell_path();
-    let output = Command::new(binary)
+    let output = crate::command_no_window(binary)
         .arg("--version")
         .env("PATH", shell_path)
         .stdin(Stdio::null())
