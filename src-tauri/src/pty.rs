@@ -342,9 +342,28 @@ fn spawn_exit_monitor(app: AppHandle, task_id: String, project_path: String, is_
     });
 }
 
+/// 创建智能体命令的 CommandBuilder。
+/// Windows 上 `.cmd`/`.bat` 脚本无法被 CreateProcessW 直接执行，
+/// 需要通过 `cmd.exe /C` 包装；`.exe` 和其它平台直接使用原始路径。
+fn new_agent_command(agent_bin: &str) -> CommandBuilder {
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(ext) = std::path::Path::new(agent_bin).extension() {
+            let ext_lower = ext.to_string_lossy().to_lowercase();
+            if ext_lower == "cmd" || ext_lower == "bat" {
+                let mut c = CommandBuilder::new("cmd.exe");
+                c.arg("/C");
+                c.arg(agent_bin);
+                return c;
+            }
+        }
+    }
+    CommandBuilder::new(agent_bin)
+}
+
 /// 为 Claude 命令构建 CommandBuilder，并根据 permission_mode 添加权限标志。
 fn build_claude_cmd(agent_bin: &str, permission_mode: &str) -> CommandBuilder {
-    let mut c = CommandBuilder::new(agent_bin);
+    let mut c = new_agent_command(agent_bin);
     match permission_mode {
         "ask" => {
             c.arg("--permission-mode");
@@ -420,7 +439,7 @@ pub async fn run_task(
     };
 
     let mut cmd = if is_codex {
-        let mut c = CommandBuilder::new(&agent_bin);
+        let mut c = new_agent_command(&agent_bin);
         c.arg("--");
         c.arg(&final_prompt);
         c
@@ -553,7 +572,7 @@ pub async fn resume_task(
 
     let agent_bin = crate::app_settings::get_agent_bin(&agent);
     let mut cmd = if agent == "codex" {
-        let mut c = CommandBuilder::new(&agent_bin);
+        let mut c = new_agent_command(&agent_bin);
         c.arg("resume");
         c.arg(&session_id);
         c
@@ -670,7 +689,12 @@ pub async fn open_shell(
         .map_err(|e| e.to_string())?;
 
     let shell = if cfg!(target_os = "windows") {
-        std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string())
+        // Win10+ 自带 powershell (5.1)；若用户装了 pwsh (7+) 则优先使用
+        if std::process::Command::new("pwsh").arg("--version").output().is_ok() {
+            "pwsh".to_string()
+        } else {
+            "powershell".to_string()
+        }
     } else {
         std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string())
     };

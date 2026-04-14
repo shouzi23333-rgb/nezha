@@ -119,8 +119,9 @@ fn build_fallback_path() -> String {
     let path_sep = if cfg!(target_os = "windows") { ";" } else { ":" };
 
     let extras: Vec<String> = if cfg!(target_os = "windows") {
-        // Windows: 只补充 home 下的常见工具路径
+        // Windows: 补充 home 下的常见工具路径
         vec![
+            format!("{home}\\.claude\\bin"),
             format!("{home}\\.local\\bin"),
             format!("{home}\\AppData\\Roaming\\npm"),
         ]
@@ -265,10 +266,39 @@ pub fn load_settings_internal() -> AppSettings {
     serde_json::from_str(&raw).unwrap_or_default()
 }
 
+/// 在 Windows 上将裸路径（无扩展名）解析为实际可执行文件。
+/// 优先级：.exe > .cmd > 原路径。
+/// 非 Windows 平台直接返回原路径。
+fn resolve_executable(bin: String) -> String {
+    #[cfg(target_os = "windows")]
+    {
+        let path = std::path::Path::new(&bin);
+        // 已有合法扩展名，直接返回
+        if let Some(ext) = path.extension() {
+            let ext_lower = ext.to_string_lossy().to_lowercase();
+            if matches!(ext_lower.as_str(), "exe" | "cmd" | "bat" | "com") {
+                return bin;
+            }
+        }
+        // 优先查找 .exe（原生 PE，CreateProcessW 可直接执行）
+        let exe_path = format!("{}.exe", bin);
+        if std::path::Path::new(&exe_path).exists() {
+            return exe_path;
+        }
+        // 其次查找 .cmd（npm 全局安装的 shim 脚本）
+        let cmd_path = format!("{}.cmd", bin);
+        if std::path::Path::new(&cmd_path).exists() {
+            return cmd_path;
+        }
+    }
+    bin
+}
+
 /// 根据 agent 名称（"claude" 或 "codex"）返回对应的可执行文件路径。
 /// 若配置为空，则回退到直接使用二进制名称。
+/// Windows 上会自动解析 .exe/.cmd 后缀，确保 CreateProcessW 可正常执行。
 pub fn get_agent_bin(agent: &str) -> String {
-    get_agent_bin_from_settings(&load_settings_internal(), agent)
+    resolve_executable(get_agent_bin_from_settings(&load_settings_internal(), agent))
 }
 
 // ── Tauri commands ────────────────────────────────────────────────────────────
