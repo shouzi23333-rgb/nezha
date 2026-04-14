@@ -106,26 +106,36 @@ pub async fn generate_commit_message(project_path: String) -> Result<String, Str
     );
 
     // 4. Build PATH with common tool locations
-    let home = std::env::var("HOME").unwrap_or_default();
+    let home = crate::storage::home_dir()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let current_path = std::env::var("PATH").unwrap_or_default();
-    let extra_paths = [
-        format!("{home}/.local/bin"),
-        format!("{home}/.npm-global/bin"),
-        "/opt/homebrew/bin".to_string(),
-        "/opt/homebrew/sbin".to_string(),
-        "/usr/local/bin".to_string(),
-        "/usr/bin".to_string(),
-        "/bin".to_string(),
-        "/usr/sbin".to_string(),
-        "/sbin".to_string(),
-    ];
+    let path_sep = if cfg!(target_os = "windows") { ";" } else { ":" };
+    let extra_paths: Vec<String> = if cfg!(target_os = "windows") {
+        vec![
+            format!("{home}\\.local\\bin"),
+            format!("{home}\\AppData\\Roaming\\npm"),
+        ]
+    } else {
+        vec![
+            format!("{home}/.local/bin"),
+            format!("{home}/.npm-global/bin"),
+            "/opt/homebrew/bin".to_string(),
+            "/opt/homebrew/sbin".to_string(),
+            "/usr/local/bin".to_string(),
+            "/usr/bin".to_string(),
+            "/bin".to_string(),
+            "/usr/sbin".to_string(),
+            "/sbin".to_string(),
+        ]
+    };
     let mut path_parts: Vec<String> = extra_paths.iter().cloned().collect();
-    for p in current_path.split(':') {
+    for p in current_path.split(path_sep) {
         if !p.is_empty() && !path_parts.contains(&p.to_string()) {
             path_parts.push(p.to_string());
         }
     }
-    let full_path = path_parts.join(":");
+    let full_path = path_parts.join(path_sep);
 
     // 5. Run agent in non-interactive exec mode with 15 second timeout
     let output = tokio::time::timeout(
@@ -133,20 +143,29 @@ pub async fn generate_commit_message(project_path: String) -> Result<String, Str
         tokio::task::spawn_blocking(move || {
             if agent == "codex" {
                 // codex exec runs in non-interactive mode without requiring a TTY
-                Command::new("codex")
-                    .args(["exec", &full_prompt])
+                let mut cmd = Command::new("codex");
+                cmd.args(["exec", &full_prompt])
                     .env("PATH", &full_path)
-                    .env("HOME", &home)
-                    .current_dir(&project_path)
-                    .output()
+                    .current_dir(&project_path);
+                if cfg!(target_os = "windows") {
+                    cmd.env("USERPROFILE", &home);
+                } else {
+                    cmd.env("HOME", &home);
+                }
+                cmd.output()
                     .map_err(|e| format!("Failed to run codex: {}", e))
             } else {
                 // claude -p runs in non-interactive print mode; prompt is a positional arg
-                Command::new("claude")
-                    .args(["-p", &full_prompt, "--output-format", "text"])
+                let mut cmd = Command::new("claude");
+                cmd.args(["-p", &full_prompt, "--output-format", "text"])
                     .env("PATH", &full_path)
-                    .env("HOME", &home)
-                    .current_dir(&project_path)
+                    .current_dir(&project_path);
+                if cfg!(target_os = "windows") {
+                    cmd.env("USERPROFILE", &home);
+                } else {
+                    cmd.env("HOME", &home);
+                }
+                cmd
                     .output()
                     .map_err(|e| format!("Failed to run claude: {}", e))
             }
@@ -533,7 +552,7 @@ pub async fn git_file_diff(
         let fallback_args = vec![
             "diff".to_string(),
             "--no-index".to_string(),
-            "/dev/null".to_string(),
+            if cfg!(target_os = "windows") { "NUL" } else { "/dev/null" }.to_string(),
             abs_path_str,
         ];
         let fallback = run_git_with_timeout(project_path, fallback_args, Duration::from_secs(10)).await?;

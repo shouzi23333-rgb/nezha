@@ -39,6 +39,11 @@ pub fn get_login_shell_path() -> &'static str {
 }
 
 fn resolve_login_shell_env() -> Vec<(String, String)> {
+    // Windows 没有 login shell 概念，直接使用当前进程环境
+    if cfg!(target_os = "windows") {
+        return build_fallback_env();
+    }
+
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
 
     // -l: login shell，source .zprofile / .bash_profile
@@ -107,26 +112,38 @@ fn parse_shell_env_output(stdout: &[u8]) -> Option<Vec<(String, String)>> {
 }
 
 fn build_fallback_path() -> String {
-    let home = std::env::var("HOME").unwrap_or_default();
+    let home = crate::storage::home_dir()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let current = std::env::var("PATH").unwrap_or_default();
-    let extras = [
-        format!("{home}/.local/bin"),
-        format!("{home}/.npm-global/bin"),
-        "/opt/homebrew/bin".to_string(),
-        "/opt/homebrew/sbin".to_string(),
-        "/usr/local/bin".to_string(),
-        "/usr/bin".to_string(),
-        "/bin".to_string(),
-        "/usr/sbin".to_string(),
-        "/sbin".to_string(),
-    ];
+    let path_sep = if cfg!(target_os = "windows") { ";" } else { ":" };
+
+    let extras: Vec<String> = if cfg!(target_os = "windows") {
+        // Windows: 只补充 home 下的常见工具路径
+        vec![
+            format!("{home}\\.local\\bin"),
+            format!("{home}\\AppData\\Roaming\\npm"),
+        ]
+    } else {
+        vec![
+            format!("{home}/.local/bin"),
+            format!("{home}/.npm-global/bin"),
+            "/opt/homebrew/bin".to_string(),
+            "/opt/homebrew/sbin".to_string(),
+            "/usr/local/bin".to_string(),
+            "/usr/bin".to_string(),
+            "/bin".to_string(),
+            "/usr/sbin".to_string(),
+            "/sbin".to_string(),
+        ]
+    };
     let mut parts: Vec<String> = extras.to_vec();
-    for p in current.split(':') {
+    for p in current.split(path_sep) {
         if !p.is_empty() && !parts.contains(&p.to_string()) {
             parts.push(p.to_string());
         }
     }
-    parts.join(":")
+    parts.join(path_sep)
 }
 
 fn build_fallback_env() -> Vec<(String, String)> {
@@ -141,9 +158,11 @@ fn build_fallback_env() -> Vec<(String, String)> {
     }
 
     if !env.iter().any(|(key, _)| key == "HOME") {
-        let home = std::env::var("HOME").unwrap_or_default();
-        if !home.is_empty() {
-            env.push(("HOME".to_string(), home));
+        if let Ok(home) = crate::storage::home_dir() {
+            let home_str = home.to_string_lossy().into_owned();
+            if !home_str.is_empty() {
+                env.push(("HOME".to_string(), home_str));
+            }
         }
     }
 
@@ -187,31 +206,30 @@ fn clear_cached_versions() {
 }
 
 fn nezha_dir() -> Result<PathBuf, String> {
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .ok_or_else(|| "Cannot find home directory".to_string())?;
-    Ok(home.join(".nezha"))
+    Ok(crate::storage::home_dir()?.join(".nezha"))
 }
 
 fn settings_path() -> Result<PathBuf, String> {
     Ok(nezha_dir()?.join("settings.json"))
 }
 
-/// 执行 `which <binary>` 返回完整路径，找不到则返回空字符串。
+/// 执行 `which`（Unix）或 `where`（Windows）返回完整路径，找不到则返回空字符串。
 /// 使用 login shell 解析后的完整 PATH，确保 nvm 等版本管理器的路径也能被找到。
 fn detect_path(binary: &str) -> String {
     let shell_path = get_login_shell_path();
 
-    let output = Command::new("which")
+    let which_cmd = if cfg!(target_os = "windows") { "where" } else { "which" };
+    let output = Command::new(which_cmd)
         .arg(binary)
         .env("PATH", shell_path)
         .output();
 
     if let Ok(out) = output {
         if out.status.success() {
-            let p = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            if !p.is_empty() {
-                return p;
+            // `where`（Windows）可能返回多行结果，只取第一个非空行
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            if let Some(p) = stdout.lines().map(|l| l.trim()).find(|l| !l.is_empty()) {
+                return p.to_string();
             }
         }
     }

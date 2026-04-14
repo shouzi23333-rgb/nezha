@@ -125,9 +125,7 @@ pub fn write_project_config(project_path: String, config: ProjectConfig) -> Resu
 }
 
 fn home_dir() -> Result<std::path::PathBuf, String> {
-    std::env::var_os("HOME")
-        .map(std::path::PathBuf::from)
-        .ok_or_else(|| "Cannot find home directory".to_string())
+    crate::storage::home_dir()
 }
 
 fn agent_config_path(agent: &str) -> Result<std::path::PathBuf, String> {

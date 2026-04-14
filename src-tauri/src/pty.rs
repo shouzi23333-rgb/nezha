@@ -669,7 +669,11 @@ pub async fn open_shell(
         })
         .map_err(|e| e.to_string())?;
 
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    let shell = if cfg!(target_os = "windows") {
+        std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string())
+    } else {
+        std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string())
+    };
     let mut cmd = CommandBuilder::new(&shell);
     cmd.cwd(&project_path);
     setup_env(&mut cmd);

@@ -117,7 +117,7 @@ fn session_modified_at(path: &Path) -> SystemTime {
 
 fn codex_sessions_roots(project_path: &str) -> Vec<PathBuf> {
     let mut roots = vec![PathBuf::from(project_path).join(".codex").join("sessions")];
-    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+    if let Ok(home) = crate::storage::home_dir() {
         let home_root = home.join(".codex").join("sessions");
         if !roots.iter().any(|root| root == &home_root) {
             roots.push(home_root);
@@ -504,7 +504,7 @@ fn assistant_message_requests_user_input(payload: Option<&serde_json::Value>) ->
 // ── Claude Code 会话监视器 ────────────────────────────────────────────────────
 
 fn claude_sessions_dir_for_project(project_path: &str) -> Option<PathBuf> {
-    let home = std::env::var_os("HOME").map(PathBuf::from)?;
+    let home = crate::storage::home_dir().ok()?;
     let encoded: String = project_path
         .chars()
         .map(|c| {

@@ -18,7 +18,11 @@ export function getAvatarGradient(name: string): [string, string] {
 }
 
 export function shortenPath(p: string) {
-  return p.replace(/^\/Users\/[^/]+/, "~");
+  // macOS: /Users/<name>/... → ~/...
+  // Windows: C:\Users\<name>\... → ~/...
+  return p
+    .replace(/^\/Users\/[^/]+/, "~")
+    .replace(/^[A-Z]:\\Users\\[^\\]+/i, "~");
 }
 
 export function load<T>(key: string, fallback: T): T {

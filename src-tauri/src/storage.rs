@@ -48,11 +48,55 @@ pub struct Task {
 
 // ── Path helpers ─────────────────────────────────────────────────────────────
 
+/// 跨平台获取用户 home 目录。
+///
+/// **Windows**：优先读 `%USERPROFILE%`（始终是原生路径如 `C:\Users\xxx`），
+/// 再尝试 `%HOMEDRIVE%%HOMEPATH%`，最后才回退到 `$HOME`。
+/// 之所以不优先读 `$HOME`，是因为 Git Bash / MSYS 可能把它设成
+/// `/c/Users/xxx` 这样的类 Unix 路径，Rust 原生文件 API 无法识别。
+///
+/// **macOS / Linux**：直接读 `$HOME`。
+pub fn home_dir() -> Result<PathBuf, String> {
+    #[cfg(target_os = "windows")]
+    {
+        // Windows 优先：USERPROFILE 始终是合法的原生路径
+        if let Some(profile) = std::env::var_os("USERPROFILE").map(PathBuf::from) {
+            if !profile.as_os_str().is_empty() {
+                return Ok(profile);
+            }
+        }
+        // 兜底：HOMEDRIVE + HOMEPATH
+        if let (Some(drive), Some(path)) =
+            (std::env::var_os("HOMEDRIVE"), std::env::var_os("HOMEPATH"))
+        {
+            let mut home = PathBuf::from(drive);
+            home.push(path);
+            if !home.as_os_str().is_empty() {
+                return Ok(home);
+            }
+        }
+        // 最后才尝试 HOME（可能来自 Git Bash，但聊胜于无）
+        if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+            if !home.as_os_str().is_empty() {
+                return Ok(home);
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+            if !home.as_os_str().is_empty() {
+                return Ok(home);
+            }
+        }
+    }
+
+    Err("Cannot find home directory".to_string())
+}
+
 fn nezha_dir() -> Result<PathBuf, String> {
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .ok_or_else(|| "Cannot find home directory".to_string())?;
-    Ok(home.join(".nezha"))
+    Ok(home_dir()?.join(".nezha"))
 }
 
 fn projects_path() -> Result<PathBuf, String> {
