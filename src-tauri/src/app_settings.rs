@@ -214,20 +214,23 @@ fn settings_path() -> Result<PathBuf, String> {
     Ok(nezha_dir()?.join("settings.json"))
 }
 
-/// 执行 `which`（Unix）或 `where`（Windows）返回完整路径，找不到则返回空字符串。
-/// 使用 login shell 解析后的完整 PATH，确保 nvm 等版本管理器的路径也能被找到。
+/// 执行 `which`（Unix）或 `where.exe` + PowerShell 兜底（Windows）返回完整路径，
+/// 找不到则返回空字符串。
 fn detect_path(binary: &str) -> String {
-    let shell_path = get_login_shell_path();
+    if cfg!(target_os = "windows") {
+        return detect_path_windows(binary);
+    }
 
-    let which_cmd = if cfg!(target_os = "windows") { "where" } else { "which" };
-    let output = crate::command_no_window(which_cmd)
+    let shell_path = get_login_shell_path();
+    let output = crate::command_no_window("which")
         .arg(binary)
         .env("PATH", shell_path)
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
         .output();
 
     if let Ok(out) = output {
         if out.status.success() {
-            // `where`（Windows）可能返回多行结果，只取第一个非空行
             let stdout = String::from_utf8_lossy(&out.stdout);
             if let Some(p) = stdout.lines().map(|l| l.trim()).find(|l| !l.is_empty()) {
                 return p.to_string();
@@ -235,6 +238,71 @@ fn detect_path(binary: &str) -> String {
         }
     }
     String::new()
+}
+
+/// Windows 专用路径探测：先用 `where.exe`，失败则用 PowerShell `Get-Command`。
+/// 通过 `choose_windows_command_path` 在多个候选中优先选 `.cmd > .bat > .exe`。
+fn detect_path_windows(binary: &str) -> String {
+    let shell_path = get_login_shell_path();
+
+    let output = crate::command_no_window("where.exe")
+        .arg(binary)
+        .env("PATH", shell_path)
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output();
+
+    if let Ok(out) = output {
+        if out.status.success() {
+            let candidates: Vec<String> = String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .map(|l| l.trim().to_string())
+                .filter(|l| !l.is_empty())
+                .collect();
+            if let Some(path) = choose_windows_command_path(&candidates) {
+                return path;
+            }
+        }
+    }
+
+    // 兜底：PowerShell Get-Command（where.exe 找不到脚本路径时有效）
+    let ps_command = format!(
+        "$cmd = Get-Command {binary} -ErrorAction SilentlyContinue; if ($cmd) {{ $cmd.Source }}"
+    );
+    let output = crate::command_no_window("powershell.exe")
+        .args(["-NoLogo", "-NoProfile", "-Command", &ps_command])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output();
+
+    if let Ok(out) = output {
+        if out.status.success() {
+            let candidates: Vec<String> = String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .map(|l| l.trim().to_string())
+                .filter(|l| !l.is_empty())
+                .collect();
+            if let Some(path) = choose_windows_command_path(&candidates) {
+                return path;
+            }
+        }
+    }
+
+    String::new()
+}
+
+/// 从候选路径列表中按 `.cmd > .bat > .exe` 优先级选出最合适的。
+/// Node.js 全局安装的工具通常只有 `.cmd` shim，优先选它而非同名 `.exe`。
+fn choose_windows_command_path(candidates: &[String]) -> Option<String> {
+    for ext in [".cmd", ".bat", ".exe"] {
+        if let Some(path) = candidates
+            .iter()
+            .find(|p| p.to_ascii_lowercase().ends_with(ext))
+        {
+            return Some(path.clone());
+        }
+    }
+    candidates.first().cloned()
 }
 
 /// 内部工具函数：从文件读取设置。文件不存在时自动检测并保存。
@@ -332,14 +400,17 @@ pub fn detect_agent_paths() -> Result<AppSettings, String> {
 /// 运行 `<binary> --version` 解析版本号。
 /// 支持的输出格式：
 ///   "2.1.87 (Claude Code)"   →  "2.1.87"
-///   "Codex v0.1.2025"        →  "0.1.2025"
+///   "OpenAI Codex v0.120.0"  →  "0.120.0"
+///   "codex-cli 0.120.0"      →  "0.120.0"
+///
+/// Windows 上自动为 `.cmd`/`.bat`/`.ps1` 脚本选择正确的启动方式，
+/// 并同时检查 stdout 和 stderr（部分工具将版本输出到 stderr）。
 fn detect_version(binary: &str) -> Option<String> {
     let shell_path = get_login_shell_path();
-    let output = crate::command_no_window(binary)
+    let output = crate::command_for_binary(binary)
         .arg("--version")
         .env("PATH", shell_path)
         .stdin(Stdio::null())
-        .stderr(Stdio::null())
         .output()
         .ok()?;
 
@@ -347,11 +418,42 @@ fn detect_version(binary: &str) -> Option<String> {
         return None;
     }
 
-    let text = String::from_utf8_lossy(&output.stdout);
-    // 找第一个以数字开头的 token（形如 "1.2.3"）
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    extract_version_token(&stdout).or_else(|| extract_version_token(&stderr))
+}
+
+/// 从文本中提取第一个语义化版本 token（支持 `v`/`V` 前缀）。
+fn extract_version_token(text: &str) -> Option<String> {
     text.split_whitespace()
-        .find(|s| s.chars().next().map_or(false, |c| c.is_ascii_digit()))
-        .map(|s| s.to_string())
+        .map(normalize_version_token)
+        .find(|token| is_semver_like(token))
+}
+
+/// 去除版本 token 的 `v`/`V` 前缀及两端标点。
+fn normalize_version_token(token: &str) -> String {
+    token
+        .trim()
+        .trim_matches(|c: char| matches!(c, '(' | ')' | '[' | ']' | ',' | ';'))
+        .trim_start_matches('v')
+        .trim_start_matches('V')
+        .to_string()
+}
+
+/// 判断 token 是否形如 "1.2.3"（只含数字和点，且两者都有）。
+fn is_semver_like(token: &str) -> bool {
+    let mut saw_digit = false;
+    let mut saw_dot = false;
+    for ch in token.chars() {
+        if ch.is_ascii_digit() {
+            saw_digit = true;
+        } else if ch == '.' {
+            saw_dot = true;
+        } else {
+            return false;
+        }
+    }
+    saw_digit && saw_dot
 }
 
 fn detect_versions_for_settings(settings: &AppSettings) -> AgentVersions {

@@ -48,7 +48,7 @@ impl CodexRpcClient {
         let shell_path = get_login_shell_path();
         let binary = get_agent_bin("codex");
 
-        let mut child = crate::command_no_window(&binary)
+        let mut child = crate::command_for_binary(&binary)
             .arg("app-server")
             .env("PATH", &shell_path)
             .stdin(Stdio::piped())

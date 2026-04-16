@@ -142,7 +142,8 @@ pub async fn generate_commit_message(project_path: String) -> Result<String, Str
         tokio::task::spawn_blocking(move || {
             if agent == "codex" {
                 // codex exec runs in non-interactive mode without requiring a TTY
-                let mut cmd = crate::command_no_window("codex");
+                let codex_bin = crate::app_settings::get_agent_bin("codex");
+                let mut cmd = crate::command_for_binary(&codex_bin);
                 cmd.args(["exec", &full_prompt])
                     .env("PATH", &full_path)
                     .current_dir(&project_path);

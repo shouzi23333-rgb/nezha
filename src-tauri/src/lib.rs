@@ -32,6 +32,44 @@ pub(crate) fn command_no_window(program: &str) -> std::process::Command {
     cmd
 }
 
+/// 为可执行文件（含脚本）创建 Command，同时抑制控制台窗口。
+///
+/// 相比 `command_no_window`，额外处理 Windows 上无法被 CreateProcess 直接执行的脚本：
+/// - `.cmd` / `.bat` → `cmd.exe /C <binary>`
+/// - `.ps1`          → `powershell.exe -NoLogo -NoProfile -File <binary>`
+/// - 其他（`.exe` 或无扩展名）→ 直接 `Command::new(binary)`
+///
+/// 非 Windows 平台与 `command_no_window` 行为相同。
+pub(crate) fn command_for_binary(binary: &str) -> std::process::Command {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        let ext = std::path::Path::new(binary)
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_ascii_lowercase());
+        let mut cmd = match ext.as_deref() {
+            Some("ps1") => {
+                let mut c = std::process::Command::new("powershell.exe");
+                c.args(["-NoLogo", "-NoProfile", "-File", binary]);
+                c
+            }
+            Some("cmd") | Some("bat") => {
+                let mut c = std::process::Command::new("cmd.exe");
+                c.args(["/C", binary]);
+                c
+            }
+            _ => std::process::Command::new(binary),
+        };
+        cmd.creation_flags(0x08000000);
+        cmd
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::process::Command::new(binary)
+    }
+}
+
 pub struct TaskManager {
     pub(crate) pty_masters: Mutex<HashMap<String, Box<dyn portable_pty::MasterPty + Send>>>,
     pub(crate) pty_writers: Mutex<HashMap<String, Box<dyn Write + Send>>>,
