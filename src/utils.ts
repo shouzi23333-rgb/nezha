@@ -32,6 +32,12 @@ export function getPathBasename(path: string) {
   return parts[parts.length - 1] || normalized;
 }
 
+export function isWindowsPlatform(platform: string | null | undefined) {
+  if (!platform) return false;
+  const normalized = platform.trim().toLowerCase();
+  return normalized === "windows" || normalized === "win32" || normalized.includes("windows");
+}
+
 export function getAgentConfigDisplayPath(agent: "claude" | "codex", isWindows: boolean) {
   if (isWindows) {
     return agent === "claude" ? "~\\.claude\\settings.json" : "~\\.codex\\config.toml";

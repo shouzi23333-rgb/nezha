@@ -15,7 +15,7 @@ import s from "../styles";
 import claudeLogo from "../assets/claude.svg";
 import chatgptLogo from "../assets/chatgpt.svg";
 import appLogo from "../assets/app-logo.png";
-import { getAgentBinaryPlaceholder, getAgentConfigDisplayPath } from "../utils";
+import { getAgentBinaryPlaceholder, getAgentConfigDisplayPath, isWindowsPlatform } from "../utils";
 
 // Reuse the same singleton highlighter as FileViewer
 import type { Highlighter } from "shiki";
@@ -1102,7 +1102,19 @@ export function AppSettingsDialog({
   onThemeModeChange: (mode: ThemeMode) => void;
 }) {
   const [activeNav, setActiveNav] = useState<NavKey>("general");
-  const isWindows = typeof navigator !== "undefined" && /windows/i.test(navigator.userAgent);
+  const [isWindows, setIsWindows] = useState(() =>
+    typeof navigator !== "undefined" && isWindowsPlatform(navigator.userAgent),
+  );
+
+  useEffect(() => {
+    invoke<string>("get_current_platform")
+      .then((platform) => setIsWindows(isWindowsPlatform(platform)))
+      .catch(() => {
+        if (typeof navigator !== "undefined") {
+          setIsWindows(isWindowsPlatform(navigator.userAgent));
+        }
+      });
+  }, []);
 
   function handleOverlayClick(e: React.MouseEvent) {
     if (e.target === e.currentTarget) onClose();

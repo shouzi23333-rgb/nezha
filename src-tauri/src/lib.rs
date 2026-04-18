@@ -186,6 +186,7 @@ pub fn run() {
             storage::save_project_tasks,
             app_settings::load_app_settings,
             app_settings::save_app_settings,
+            app_settings::get_current_platform,
             app_settings::detect_agent_paths,
             app_settings::detect_agent_versions,
             app_settings::detect_agent_versions_for_settings,

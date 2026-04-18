@@ -6,6 +6,7 @@ import {
   getPathBasename,
   getAgentConfigDisplayPath,
   getAgentBinaryPlaceholder,
+  isWindowsPlatform,
   load,
   save,
   getGitStatusColor,
@@ -82,6 +83,12 @@ describe("getPathBasename", () => {
 });
 
 describe("Windows adaptation display helpers", () => {
+  it("识别 Tauri 返回的平台字符串是否为 Windows", () => {
+    expect(isWindowsPlatform("windows")).toBe(true);
+    expect(isWindowsPlatform("win32")).toBe(true);
+    expect(isWindowsPlatform("linux")).toBe(false);
+  });
+
   it("按平台返回 agent 配置文件显示路径", () => {
     expect(getAgentConfigDisplayPath("claude", false)).toBe("~/.claude/settings.json");
     expect(getAgentConfigDisplayPath("codex", true)).toBe("~\\.codex\\config.toml");

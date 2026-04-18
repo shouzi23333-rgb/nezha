@@ -214,6 +214,11 @@ fn settings_path() -> Result<PathBuf, String> {
     Ok(nezha_dir()?.join("settings.json"))
 }
 
+#[tauri::command]
+pub fn get_current_platform() -> String {
+    std::env::consts::OS.to_string()
+}
+
 /// 执行 `which`（Unix）或 `where.exe` + PowerShell 兜底（Windows）返回完整路径，
 /// 找不到则返回空字符串。
 fn detect_path(binary: &str) -> String {
