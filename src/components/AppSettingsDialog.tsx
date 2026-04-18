@@ -15,6 +15,7 @@ import s from "../styles";
 import claudeLogo from "../assets/claude.svg";
 import chatgptLogo from "../assets/chatgpt.svg";
 import appLogo from "../assets/app-logo.png";
+import { getAgentBinaryPlaceholder, getAgentConfigDisplayPath } from "../utils";
 
 // Reuse the same singleton highlighter as FileViewer
 import type { Highlighter } from "shiki";
@@ -48,7 +49,6 @@ const NAV_ITEMS: Array<{
   key: NavKey;
   label: string;
   logo?: string;
-  filePath?: string;
   lang?: string;
 }> = [
   { key: "general", label: "General" },
@@ -58,14 +58,12 @@ const NAV_ITEMS: Array<{
     key: "claude",
     label: "Claude Code",
     logo: claudeLogo,
-    filePath: "~/.claude/settings.json",
     lang: "json",
   },
   {
     key: "codex",
     label: "Codex",
     logo: chatgptLogo,
-    filePath: "~/.codex/config.toml",
     lang: "toml",
   },
 ];
@@ -505,7 +503,7 @@ function ThemePanel({ themeMode, systemPrefersDark, onThemeModeChange }: ThemePa
 
 // ── General Panel ─────────────────────────────────────────────────────────────
 
-function GeneralPanel() {
+function GeneralPanel({ isWindows }: { isWindows: boolean }) {
   const [settings, setSettings] = useState<AppSettings>({ claude_path: "", codex_path: "" });
   const [original, setOriginal] = useState<AppSettings>({ claude_path: "", codex_path: "" });
   const [versions, setVersions] = useState<AgentVersions>({
@@ -692,7 +690,7 @@ function GeneralPanel() {
                 style={inputStyle}
                 value={settings.claude_path}
                 onChange={(e) => setSettings((prev) => ({ ...prev, claude_path: e.target.value }))}
-                placeholder="/usr/local/bin/claude"
+                placeholder={getAgentBinaryPlaceholder("claude", isWindows)}
                 spellCheck={false}
               />
               <span style={hintStyle}>Leave empty to use claude from the system PATH.</span>
@@ -704,7 +702,7 @@ function GeneralPanel() {
                 style={inputStyle}
                 value={settings.codex_path}
                 onChange={(e) => setSettings((prev) => ({ ...prev, codex_path: e.target.value }))}
-                placeholder="/usr/local/bin/codex"
+                placeholder={getAgentBinaryPlaceholder("codex", isWindows)}
                 spellCheck={false}
               />
               <span style={hintStyle}>Leave empty to use codex from the system PATH.</span>
@@ -1104,6 +1102,7 @@ export function AppSettingsDialog({
   onThemeModeChange: (mode: ThemeMode) => void;
 }) {
   const [activeNav, setActiveNav] = useState<NavKey>("general");
+  const isWindows = typeof navigator !== "undefined" && /windows/i.test(navigator.userAgent);
 
   function handleOverlayClick(e: React.MouseEvent) {
     if (e.target === e.currentTarget) onClose();
@@ -1176,7 +1175,7 @@ export function AppSettingsDialog({
           </div>
 
           {activeNav === "general" ? (
-            <GeneralPanel key="general" />
+            <GeneralPanel key="general" isWindows={isWindows} />
           ) : activeNav === "theme" ? (
             <ThemePanel
               key="theme"
@@ -1190,7 +1189,7 @@ export function AppSettingsDialog({
             <AgentConfigPanel
               key={activeNav}
               agentKey={activeNav as AgentKey}
-              filePath={activeItem.filePath!}
+              filePath={getAgentConfigDisplayPath(activeNav as AgentKey, isWindows)}
               lang={activeItem.lang!}
               isDark={isDark}
             />

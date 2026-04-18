@@ -9,6 +9,7 @@ import { WelcomePage } from "./components/WelcomePage";
 import { ProjectPage } from "./components/ProjectPage";
 import { useToast } from "./components/Toast";
 import { useTerminalManager } from "./hooks/useTerminalManager";
+import { getPathBasename } from "./utils";
 import s from "./styles";
 import "./App.css";
 
@@ -165,7 +166,7 @@ function App() {
     const selected = await openDialog({ directory: true, multiple: false });
     if (!selected) return;
     const path = selected as string;
-    const name = path.split("/").pop() || path;
+    const name = getPathBasename(path);
     const project: Project = { id: `${Date.now()}`, name, path, lastOpenedAt: Date.now() };
     setProjects((prev) => {
       const next = [project, ...prev.filter((p) => p.path !== path)];

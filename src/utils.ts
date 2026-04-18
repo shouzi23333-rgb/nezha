@@ -25,6 +25,27 @@ export function shortenPath(p: string) {
     .replace(/^[A-Z]:\\Users\\[^\\]+/i, "~");
 }
 
+export function getPathBasename(path: string) {
+  const normalized = path.replace(/[\\/]+$/, "");
+  if (!normalized) return path;
+  const parts = normalized.split(/[\\/]/);
+  return parts[parts.length - 1] || normalized;
+}
+
+export function getAgentConfigDisplayPath(agent: "claude" | "codex", isWindows: boolean) {
+  if (isWindows) {
+    return agent === "claude" ? "~\\.claude\\settings.json" : "~\\.codex\\config.toml";
+  }
+  return agent === "claude" ? "~/.claude/settings.json" : "~/.codex/config.toml";
+}
+
+export function getAgentBinaryPlaceholder(agent: "claude" | "codex", isWindows: boolean) {
+  if (isWindows) {
+    return `C:\\Users\\<you>\\AppData\\Roaming\\npm\\${agent}.cmd`;
+  }
+  return `/usr/local/bin/${agent}`;
+}
+
 export function load<T>(key: string, fallback: T): T {
   try {
     const r = localStorage.getItem(key);

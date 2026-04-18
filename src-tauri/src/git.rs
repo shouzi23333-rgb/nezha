@@ -78,7 +78,6 @@ fn run_git_check<S: AsRef<std::ffi::OsStr>>(
 
 #[tauri::command]
 pub async fn generate_commit_message(project_path: String) -> Result<String, String> {
-
     // 1. Get staged diff
     let diff_output = run_git(&project_path, &["diff", "--staged"])?;
     let diff = String::from_utf8_lossy(&diff_output.stdout).into_owned();
@@ -104,39 +103,12 @@ pub async fn generate_commit_message(project_path: String) -> Result<String, Str
         commit_prompt, diff
     );
 
-    // 4. Build PATH with common tool locations
     let home = crate::storage::home_dir()
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let current_path = std::env::var("PATH").unwrap_or_default();
-    let path_sep = if cfg!(target_os = "windows") { ";" } else { ":" };
-    let extra_paths: Vec<String> = if cfg!(target_os = "windows") {
-        vec![
-            format!("{home}\\.local\\bin"),
-            format!("{home}\\AppData\\Roaming\\npm"),
-        ]
-    } else {
-        vec![
-            format!("{home}/.local/bin"),
-            format!("{home}/.npm-global/bin"),
-            "/opt/homebrew/bin".to_string(),
-            "/opt/homebrew/sbin".to_string(),
-            "/usr/local/bin".to_string(),
-            "/usr/bin".to_string(),
-            "/bin".to_string(),
-            "/usr/sbin".to_string(),
-            "/sbin".to_string(),
-        ]
-    };
-    let mut path_parts: Vec<String> = extra_paths.iter().cloned().collect();
-    for p in current_path.split(path_sep) {
-        if !p.is_empty() && !path_parts.contains(&p.to_string()) {
-            path_parts.push(p.to_string());
-        }
-    }
-    let full_path = path_parts.join(path_sep);
+    let shell_path = crate::app_settings::get_login_shell_path().to_string();
 
-    // 5. Run agent in non-interactive exec mode with 15 second timeout
+    // 4. Run agent in non-interactive exec mode with 15 second timeout
     let output = tokio::time::timeout(
         Duration::from_secs(15),
         tokio::task::spawn_blocking(move || {
@@ -145,7 +117,7 @@ pub async fn generate_commit_message(project_path: String) -> Result<String, Str
                 let codex_bin = crate::app_settings::get_agent_bin("codex");
                 let mut cmd = crate::command_for_binary(&codex_bin);
                 cmd.args(["exec", &full_prompt])
-                    .env("PATH", &full_path)
+                    .env("PATH", &shell_path)
                     .current_dir(&project_path);
                 if cfg!(target_os = "windows") {
                     cmd.env("USERPROFILE", &home);
@@ -156,9 +128,10 @@ pub async fn generate_commit_message(project_path: String) -> Result<String, Str
                     .map_err(|e| format!("Failed to run codex: {}", e))
             } else {
                 // claude -p runs in non-interactive print mode; prompt is a positional arg
-                let mut cmd = crate::command_no_window("claude");
+                let claude_bin = crate::app_settings::get_agent_bin("claude");
+                let mut cmd = crate::command_for_binary(&claude_bin);
                 cmd.args(["-p", &full_prompt, "--output-format", "text"])
-                    .env("PATH", &full_path)
+                    .env("PATH", &shell_path)
                     .current_dir(&project_path);
                 if cfg!(target_os = "windows") {
                     cmd.env("USERPROFILE", &home);

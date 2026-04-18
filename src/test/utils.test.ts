@@ -3,6 +3,9 @@ import {
   AVATAR_COLORS,
   getAvatarGradient,
   shortenPath,
+  getPathBasename,
+  getAgentConfigDisplayPath,
+  getAgentBinaryPlaceholder,
   load,
   save,
   getGitStatusColor,
@@ -56,6 +59,37 @@ describe("shortenPath", () => {
 
   it("路径仅为 /Users/<username> 时缩短为 ~", () => {
     expect(shortenPath("/Users/john")).toBe("~");
+  });
+
+  it("Windows 用户目录路径会缩短为 ~", () => {
+    expect(shortenPath("C:\\Users\\john\\workspace\\nezha")).toBe("~\\workspace\\nezha");
+  });
+});
+
+describe("getPathBasename", () => {
+  it("提取 Unix 路径最后一段", () => {
+    expect(getPathBasename("/Users/john/workspace/nezha")).toBe("nezha");
+  });
+
+  it("提取 Windows 路径最后一段", () => {
+    expect(getPathBasename("C:\\work\\clients\\nezha")).toBe("nezha");
+  });
+
+  it("末尾带分隔符时仍返回目录名", () => {
+    expect(getPathBasename("C:\\work\\clients\\nezha\\")).toBe("nezha");
+    expect(getPathBasename("/Users/john/workspace/nezha/")).toBe("nezha");
+  });
+});
+
+describe("Windows adaptation display helpers", () => {
+  it("按平台返回 agent 配置文件显示路径", () => {
+    expect(getAgentConfigDisplayPath("claude", false)).toBe("~/.claude/settings.json");
+    expect(getAgentConfigDisplayPath("codex", true)).toBe("~\\.codex\\config.toml");
+  });
+
+  it("按平台返回 agent 可执行文件 placeholder", () => {
+    expect(getAgentBinaryPlaceholder("claude", false)).toBe("/usr/local/bin/claude");
+    expect(getAgentBinaryPlaceholder("codex", true)).toBe("C:\\Users\\<you>\\AppData\\Roaming\\npm\\codex.cmd");
   });
 });
 
