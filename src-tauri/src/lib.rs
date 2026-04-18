@@ -18,6 +18,19 @@ mod usage;
 
 use session::{ClaudeSessionInfo, CodexSessionInfo};
 
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+#[cfg(target_os = "windows")]
+const SW_HIDE: u16 = 0;
+
+#[cfg(target_os = "windows")]
+fn apply_hidden_window_flags(cmd: &mut std::process::Command) {
+    use std::os::windows::process::CommandExt;
+
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd.show_window(SW_HIDE);
+}
+
 /// 创建不弹出控制台窗口的 Command。
 /// Windows 上设置 CREATE_NO_WINDOW (0x08000000) 标志，
 /// 防止 cmd.exe / git 等控制台程序产生可见窗口。
@@ -26,8 +39,7 @@ pub(crate) fn command_no_window(program: &str) -> std::process::Command {
     let mut cmd = std::process::Command::new(program);
     #[cfg(target_os = "windows")]
     {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        apply_hidden_window_flags(&mut cmd);
     }
     cmd
 }
@@ -61,7 +73,7 @@ pub(crate) fn command_for_binary(binary: &str) -> std::process::Command {
             }
             _ => std::process::Command::new(binary),
         };
-        cmd.creation_flags(0x08000000);
+        apply_hidden_window_flags(&mut cmd);
         cmd
     }
     #[cfg(not(target_os = "windows"))]
