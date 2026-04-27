@@ -16,21 +16,19 @@ import type { NavKey, SettingsPageKey } from "./app-settings/types";
 
 export function AppSettingsDialog({
   onClose,
-  isDark,
   themeMode,
   systemPrefersDark,
   onThemeModeChange,
 }: {
   onClose: () => void;
-  isDark: boolean;
   themeMode: ThemeMode;
   systemPrefersDark: boolean;
   onThemeModeChange: (mode: ThemeMode) => void;
 }) {
   const { t } = useI18n();
-  const [activePage, setActivePage] = useState<SettingsPageKey>("general");
+  const [activePage, setActivePage] = useState<SettingsPageKey>("application");
   const [expandedNav, setExpandedNav] = useState<Record<NavKey, boolean>>({
-    application: true,
+    application: false,
     agents: false,
     about: false,
   });
@@ -56,7 +54,7 @@ export function AppSettingsDialog({
     setActivePage(getFirstChildNavKey(key));
     setExpandedNav((prev) => ({
       ...prev,
-      [key]: !prev[key],
+      [key]: true,
     }));
   }
 
@@ -99,7 +97,14 @@ export function AppSettingsDialog({
               </button>
 
               {item.children && expandedNav[item.key] && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 2, margin: "2px 0 6px 22px" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 2,
+                    margin: "2px 0 6px 22px",
+                  }}
+                >
                   {item.children.map((child) => {
                     const active = activePage === child.key;
                     return (
@@ -136,7 +141,10 @@ export function AppSettingsDialog({
             </button>
           </div>
 
-          {activePage === "general" || activePage === "theme" || activePage === "shortcuts" ? (
+          {activePage === "application" ||
+          activePage === "general" ||
+          activePage === "theme" ||
+          activePage === "shortcuts" ? (
             <ApplicationSettingsPanel
               key={activePage}
               activePage={activePage}
@@ -144,8 +152,8 @@ export function AppSettingsDialog({
               systemPrefersDark={systemPrefersDark}
               onThemeModeChange={onThemeModeChange}
             />
-          ) : activePage === "agent-paths" || activePage === "claude" || activePage === "codex" ? (
-            <AgentSettingsPanel key={activePage} activePage={activePage} isDark={isDark} />
+          ) : activePage === "agents" || activePage === "claude" || activePage === "codex" ? (
+            <AgentSettingsPanel key={activePage} activePage={activePage} />
           ) : activePage === "about" ? (
             <AboutPanel key="about" />
           ) : null}

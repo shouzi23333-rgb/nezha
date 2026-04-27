@@ -1,15 +1,12 @@
 import s from "../../styles";
 import { AgentConfigPanel } from "./AgentConfigPanel";
-import { AgentPathsSection } from "./AgentPathsSection";
 import { getAgentSettingsFilePath } from "./shared";
 import type { SettingsPageKey } from "./types";
 
 export function AgentSettingsPanel({
   activePage,
-  isDark,
 }: {
-  activePage: Extract<SettingsPageKey, "agent-paths" | "claude" | "codex">;
-  isDark: boolean;
+  activePage: Extract<SettingsPageKey, "agents" | "claude" | "codex">;
 }) {
   return (
     <div
@@ -17,25 +14,23 @@ export function AgentSettingsPanel({
         ...s.settingsBody,
         display: "flex",
         flexDirection: "column",
+        gap: 20,
         padding: "20px",
       }}
     >
-      {activePage === "agent-paths" ? (
-        <AgentPathsSection />
-      ) : activePage === "claude" ? (
+      {(activePage === "agents" || activePage === "claude") && (
         <AgentConfigPanel
           agentKey="claude"
           filePath={getAgentSettingsFilePath("claude")}
-          lang="json"
-          isDark={isDark}
+          title="Claude Code"
           embedded
         />
-      ) : (
+      )}
+      {(activePage === "agents" || activePage === "codex") && (
         <AgentConfigPanel
           agentKey="codex"
           filePath={getAgentSettingsFilePath("codex")}
-          lang="toml"
-          isDark={isDark}
+          title="Codex"
           embedded
         />
       )}

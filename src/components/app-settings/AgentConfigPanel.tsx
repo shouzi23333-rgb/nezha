@@ -1,46 +1,42 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Check, Pencil } from "lucide-react";
+import { RefreshCw } from "lucide-react";
+import { DEFAULT_SEND_SHORTCUT, normalizeSendShortcut } from "../../shortcuts";
 import { useI18n } from "../../i18n";
 import s from "../../styles";
-import type { AgentKey } from "./types";
-
-import type { Highlighter } from "shiki";
-let _highlighterPromise: Promise<Highlighter> | null = null;
-function getHighlighter(): Promise<Highlighter> {
-  if (!_highlighterPromise) {
-    _highlighterPromise = import("shiki").then(({ createHighlighter }) =>
-      createHighlighter({ themes: ["github-dark", "github-light"], langs: ["json", "toml"] }),
-    );
-  }
-  return _highlighterPromise!;
-}
+import {
+  appSettingsHintStyle,
+  appSettingsLabelStyle,
+  appSettingsSectionStyle,
+  appSettingsSectionTitleStyle,
+} from "./sectionStyles";
+import { AgentConfigEditor } from "./AgentConfigEditor";
+import { AgentPathField } from "./AgentPathField";
+import {
+  APP_SETTINGS_CHANGED_EVENT,
+  type AgentKey,
+  type AgentVersions,
+  type AppSettings,
+} from "./types";
 
 type FileState =
   | { status: "loading" }
   | { status: "missing" }
   | { status: "loaded"; content: string };
 
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
+function getAgentPath(settings: AppSettings, agentKey: AgentKey): string {
+  return agentKey === "claude" ? settings.claude_path : settings.codex_path;
 }
 
 export function AgentConfigPanel({
   agentKey,
   filePath,
-  lang,
-  isDark,
+  title,
   embedded = false,
 }: {
   agentKey: AgentKey;
   filePath: string;
-  lang: string;
-  isDark: boolean;
+  title: string;
   embedded?: boolean;
 }) {
   const { t } = useI18n();
@@ -48,13 +44,23 @@ export function AgentConfigPanel({
   const [fileState, setFileState] = useState<FileState>({ status: "loading" });
   const [original, setOriginal] = useState("");
   const [editing, setEditing] = useState(false);
-  const [highlighted, setHighlighted] = useState<string | null>(null);
-  const [highlightError, setHighlightError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [settings, setSettings] = useState<AppSettings>({
+    claude_path: "",
+    codex_path: "",
+    send_shortcut: DEFAULT_SEND_SHORTCUT,
+  });
+  const [originalPath, setOriginalPath] = useState("");
+  const [loadingSettings, setLoadingSettings] = useState(true);
+  const [detectingPath, setDetectingPath] = useState(false);
+  const [savingPath, setSavingPath] = useState(false);
+  const [pathSaved, setPathSaved] = useState(false);
+  const [savingConfig, setSavingConfig] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
+  const [configSaved, setConfigSaved] = useState(false);
+  const [version, setVersion] = useState("");
+  const [refreshingVersion, setRefreshingVersion] = useState(false);
+  const versionRequestIdRef = useRef(0);
 
-  // Load file
   useEffect(() => {
     setResolvedFilePath(filePath);
     invoke<string>("get_agent_config_file_path", { agent: agentKey })
@@ -65,239 +71,215 @@ export function AgentConfigPanel({
   useEffect(() => {
     setFileState({ status: "loading" });
     setEditing(false);
-    setHighlighted(null);
-    setHighlightError(null);
     setError(null);
-    setSaved(false);
+    setConfigSaved(false);
     invoke<string | null>("read_agent_config_file", { agent: agentKey })
-      .then((c) => {
-        if (c === null) {
+      .then((content) => {
+        if (content === null) {
           setFileState({ status: "missing" });
+          setOriginal("");
         } else {
-          setFileState({ status: "loaded", content: c });
-          setOriginal(c);
+          setFileState({ status: "loaded", content });
+          setOriginal(content);
         }
       })
       .catch((e) => setError(String(e)));
   }, [agentKey]);
 
-  // Re-highlight when content or theme changes
   useEffect(() => {
-    if (fileState.status !== "loaded") return;
-    let cancelled = false;
-    setHighlighted(null);
-    setHighlightError(null);
-    getHighlighter()
-      .then((hl) => {
-        const html = hl.codeToHtml(fileState.content, {
-          lang,
-          theme: isDark ? "github-dark" : "github-light",
-        });
-        if (!cancelled) {
-          setHighlighted(html);
-        }
+    setLoadingSettings(true);
+    invoke<AppSettings>("load_app_settings")
+      .then((loadedSettings) => {
+        const normalized = {
+          ...loadedSettings,
+          send_shortcut: normalizeSendShortcut(loadedSettings.send_shortcut),
+        };
+        setSettings(normalized);
+        setOriginalPath(getAgentPath(normalized, agentKey));
       })
-      .catch((err) => {
-        if (!cancelled) {
-          setHighlightError(String(err));
-        }
-      });
+      .catch((e) => setError(String(e)))
+      .finally(() => setLoadingSettings(false));
+  }, [agentKey]);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [fileState, lang, isDark]);
-
-  async function handleSave() {
-    if (fileState.status !== "loaded") return;
-    setSaving(true);
-    setError(null);
-    setSaved(false);
+  const loadVersion = useCallback(async () => {
+    const requestId = versionRequestIdRef.current + 1;
+    versionRequestIdRef.current = requestId;
+    setRefreshingVersion(true);
     try {
-      await invoke("write_agent_config_file", { agent: agentKey, content: fileState.content });
-      setOriginal(fileState.content);
-      setSaved(true);
-      setEditing(false);
-      setTimeout(() => setSaved(false), 2000);
+      const latest = await invoke<AppSettings>("load_app_settings");
+      const detected = await invoke<AgentVersions>("detect_agent_versions_for_settings", {
+        settings: latest,
+      });
+      if (versionRequestIdRef.current === requestId) {
+        setVersion(agentKey === "claude" ? detected.claude_version : detected.codex_version);
+      }
+    } catch (e) {
+      if (versionRequestIdRef.current === requestId) {
+        setError(String(e));
+      }
+    } finally {
+      if (versionRequestIdRef.current === requestId) {
+        setRefreshingVersion(false);
+      }
+    }
+  }, [agentKey]);
+
+  useEffect(() => {
+    void loadVersion();
+  }, [loadVersion]);
+
+  async function handleDetectPath() {
+    setDetectingPath(true);
+    setError(null);
+    try {
+      const detected = await invoke<AppSettings>("detect_agent_paths");
+      const nextPath = getAgentPath(detected, agentKey);
+      setSettings((prev) => ({
+        ...prev,
+        claude_path: agentKey === "claude" ? nextPath : prev.claude_path,
+        codex_path: agentKey === "codex" ? nextPath : prev.codex_path,
+      }));
     } catch (e) {
       setError(String(e));
     } finally {
-      setSaving(false);
+      setDetectingPath(false);
     }
   }
 
-  function handleCancel() {
+  async function handleSavePath() {
+    setSavingPath(true);
+    setError(null);
+    setPathSaved(false);
+    try {
+      const latest = await invoke<AppSettings>("load_app_settings");
+      const nextSettings = {
+        ...latest,
+        send_shortcut: normalizeSendShortcut(latest.send_shortcut),
+        claude_path: agentKey === "claude" ? settings.claude_path : latest.claude_path,
+        codex_path: agentKey === "codex" ? settings.codex_path : latest.codex_path,
+      };
+      await invoke("save_app_settings", { settings: nextSettings });
+      setSettings(nextSettings);
+      setOriginalPath(getAgentPath(nextSettings, agentKey));
+      window.dispatchEvent(new Event(APP_SETTINGS_CHANGED_EVENT));
+      setPathSaved(true);
+      setTimeout(() => setPathSaved(false), 2000);
+      void loadVersion();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSavingPath(false);
+    }
+  }
+
+  async function handleSaveConfig() {
+    if (fileState.status !== "loaded") return;
+    setSavingConfig(true);
+    setError(null);
+    setConfigSaved(false);
+    try {
+      await invoke("write_agent_config_file", { agent: agentKey, content: fileState.content });
+      setOriginal(fileState.content);
+      setConfigSaved(true);
+      setEditing(false);
+      setTimeout(() => setConfigSaved(false), 2000);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSavingConfig(false);
+    }
+  }
+
+  function handleCancelConfig() {
     setFileState({ status: "loaded", content: original });
     setEditing(false);
   }
 
-  const isDirty = fileState.status === "loaded" && fileState.content !== original;
+  function updateAgentPath(value: string) {
+    setSettings((prev) => ({
+      ...prev,
+      claude_path: agentKey === "claude" ? value : prev.claude_path,
+      codex_path: agentKey === "codex" ? value : prev.codex_path,
+    }));
+  }
 
-  const body = (
-    <div
+  function startEditingConfig() {
+    if (fileState.status === "missing") {
+      setFileState({ status: "loaded", content: "" });
+      setOriginal("");
+    }
+    setEditing(true);
+  }
+
+  const currentPath = getAgentPath(settings, agentKey);
+  const pathDirty = currentPath !== originalPath;
+  const configDirty = fileState.status === "loaded" && fileState.content !== original;
+
+  return (
+    <section
       style={{
-        ...(embedded ? {} : s.settingsBody),
-        display: "flex",
-        flexDirection: "column",
-        gap: 0,
-        padding: embedded ? 0 : "14px 20px",
-        minHeight: embedded ? 300 : undefined,
+        ...(embedded ? appSettingsSectionStyle : { ...s.settingsBody, padding: "20px" }),
       }}
     >
-      {/* File path + edit button row */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-        <div
-          style={{
-            fontSize: 11.5,
-            color: "var(--text-hint)",
-            fontFamily: "var(--font-mono)",
-            background: "var(--bg-subtle)",
-            border: "1px solid var(--border-dim)",
-            borderRadius: 6,
-            padding: "4px 9px",
-          }}
-        >
-          {resolvedFilePath}
-        </div>
-        {fileState.status === "loaded" && !editing && (
+      <h3 style={appSettingsSectionTitleStyle}>{title}</h3>
+      {error && <div style={{ color: "var(--danger)", fontSize: 12.5 }}>{error}</div>}
+
+      <AgentPathField
+        agentKey={agentKey}
+        value={currentPath}
+        loading={loadingSettings}
+        detecting={detectingPath}
+        saving={savingPath}
+        saved={pathSaved}
+        dirty={pathDirty}
+        onChange={updateAgentPath}
+        onDetect={handleDetectPath}
+        onSave={handleSavePath}
+      />
+
+      <div>
+        <label style={appSettingsLabelStyle}>{t("appSettings.installedVersions")}</label>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ color: "var(--text-secondary)", fontSize: 12.5 }}>
+            {version || t("common.notDetected")}
+          </span>
           <button
+            type="button"
             style={{
-              display: "flex",
+              display: "inline-flex",
               alignItems: "center",
               gap: 5,
-              padding: "4px 10px",
+              padding: "5px 10px",
               background: "none",
               border: "1px solid var(--border-medium)",
               borderRadius: 6,
               fontSize: 12,
               color: "var(--text-secondary)",
-              cursor: "pointer",
+              cursor: refreshingVersion ? "default" : "pointer",
+              opacity: refreshingVersion ? 0.6 : 1,
             }}
-            onClick={() => setEditing(true)}
+            onClick={() => loadVersion()}
+            disabled={refreshingVersion}
           >
-            <Pencil size={12} />
-            {t("common.edit")}
+            <RefreshCw size={12} className={refreshingVersion ? "spin" : undefined} />
+            {refreshingVersion ? t("appSettings.refreshing") : t("common.refresh")}
           </button>
-        )}
-        {saved && (
-          <span
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 4,
-              fontSize: 12,
-              color: "var(--success)",
-            }}
-          >
-            <Check size={12} /> {t("common.saved")}
-          </span>
-        )}
+        </div>
+        <div style={appSettingsHintStyle}>{t("appSettings.versionsHint")}</div>
       </div>
 
-      {error && (
-        <div style={{ color: "var(--danger)", fontSize: 12.5, marginBottom: 10 }}>{error}</div>
-      )}
-
-      {highlightError && fileState.status === "loaded" && !editing && (
-        <div style={{ color: "var(--text-hint)", fontSize: 12, marginBottom: 10 }}>
-          {t("appSettings.syntaxHighlightUnavailable")}
-        </div>
-      )}
-
-      {fileState.status === "loading" && !error && (
-        <div style={{ color: "var(--text-hint)", fontSize: 13 }}>{t("common.loading")}</div>
-      )}
-
-      {fileState.status === "missing" && (
-        <div style={{ color: "var(--text-muted)", fontSize: 13 }}>
-          {t("appSettings.configFileNotFound", { path: resolvedFilePath })}
-        </div>
-      )}
-
-      {fileState.status === "loaded" &&
-        !editing &&
-        (highlighted ? (
-          <div
-            className="file-viewer-code"
-            style={{
-              flex: 1,
-              minHeight: 220,
-              maxHeight: embedded ? 340 : undefined,
-              overflowY: "auto",
-              borderRadius: 8,
-              border: "1px solid var(--border-dim)",
-              fontSize: 12.5,
-            }}
-            dangerouslySetInnerHTML={{ __html: highlighted }}
-          />
-        ) : (
-          <pre
-            style={{
-              flex: 1,
-              minHeight: 220,
-              maxHeight: embedded ? 340 : undefined,
-              margin: 0,
-              overflow: "auto",
-              padding: "14px 16px",
-              borderRadius: 8,
-              border: "1px solid var(--border-dim)",
-              background: "var(--bg-panel)",
-              color: "var(--text-primary)",
-              fontSize: 12.5,
-              fontFamily: "var(--font-mono)",
-              lineHeight: 1.6,
-              whiteSpace: "pre-wrap",
-              wordBreak: "break-word",
-            }}
-            dangerouslySetInnerHTML={{ __html: escapeHtml(fileState.content) }}
-          />
-        ))}
-
-      {fileState.status === "loaded" && editing && (
-        <textarea
-          autoFocus
-          style={{
-            ...s.modalTextarea,
-            flex: 1,
-            width: "100%",
-            minHeight: embedded ? 260 : 300,
-            resize: "none",
-            boxSizing: "border-box",
-            caretColor: "var(--text-primary)",
-          }}
-          value={fileState.content}
-          onChange={(e) => setFileState({ status: "loaded", content: e.target.value })}
-          spellCheck={false}
-        />
-      )}
-    </div>
-  );
-
-  const footer = editing && (
-    <div
-      style={{
-        ...s.settingsFooter,
-        padding: embedded ? "12px 0 0" : s.settingsFooter.padding,
-        borderTop: embedded ? "none" : s.settingsFooter.borderTop,
-      }}
-    >
-      <button style={s.modalCancelBtn} onClick={handleCancel}>
-        {t("common.cancel")}
-      </button>
-      <button
-        style={{ ...s.modalSaveBtn, opacity: saving || !isDirty ? 0.5 : 1 }}
-        onClick={handleSave}
-        disabled={saving || !isDirty}
-      >
-        {saving ? t("common.saving") : t("common.save")}
-      </button>
-    </div>
-  );
-
-  return (
-    <>
-      {body}
-      {footer}
-    </>
+      <AgentConfigEditor
+        resolvedFilePath={resolvedFilePath}
+        fileState={fileState}
+        editing={editing}
+        saved={configSaved}
+        saving={savingConfig}
+        dirty={configDirty}
+        onEdit={startEditingConfig}
+        onCancel={handleCancelConfig}
+        onSave={handleSaveConfig}
+        onContentChange={(content) => setFileState({ status: "loaded", content })}
+      />
+    </section>
   );
 }

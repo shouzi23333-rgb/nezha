@@ -51,7 +51,6 @@ export function SidebarFooterActions({
 
       {showAppSettings && (
         <AppSettingsDialog
-          isDark={isDark}
           themeMode={themeMode}
           systemPrefersDark={systemPrefersDark}
           onThemeModeChange={onThemeModeChange}

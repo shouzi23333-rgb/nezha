@@ -12,9 +12,8 @@ export const APP_SETTINGS_NAV_ITEMS: AppSettingsNavItem[] = [
   },
   {
     key: "agents",
-    labelKey: "appSettings.agentSettings",
+    labelKey: "appSettings.agent",
     children: [
-      { key: "agent-paths", labelKey: "appSettings.agentPathsShort" },
       { key: "claude", labelKey: "Claude Code" },
       { key: "codex", labelKey: "Codex" },
     ],
@@ -23,11 +22,13 @@ export const APP_SETTINGS_NAV_ITEMS: AppSettingsNavItem[] = [
 ];
 
 export function getFirstChildNavKey(key: NavKey): SettingsPageKey {
-  const item = APP_SETTINGS_NAV_ITEMS.find((navItem) => navItem.key === key);
-  return item?.children?.[0]?.key ?? "about";
+  return key === "application" || key === "agents" ? key : "about";
 }
 
 export function getParentNavKey(pageKey: SettingsPageKey): NavKey {
+  if (pageKey === "application" || pageKey === "agents" || pageKey === "about") {
+    return pageKey;
+  }
   const item = APP_SETTINGS_NAV_ITEMS.find((navItem) =>
     navItem.children?.some((child) => child.key === pageKey),
   );
@@ -36,6 +37,9 @@ export function getParentNavKey(pageKey: SettingsPageKey): NavKey {
 
 export function findNavLabelKey(pageKey: SettingsPageKey): string {
   for (const item of APP_SETTINGS_NAV_ITEMS) {
+    if (item.key === pageKey) {
+      return item.labelKey;
+    }
     if (item.key === "about" && pageKey === "about") {
       return item.labelKey;
     }

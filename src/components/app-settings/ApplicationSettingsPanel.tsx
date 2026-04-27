@@ -6,7 +6,7 @@ import { ThemeSettingsSection } from "./ThemeSettingsSection";
 import type { SettingsPageKey } from "./types";
 
 interface ApplicationSettingsPanelProps {
-  activePage: Extract<SettingsPageKey, "general" | "theme" | "shortcuts">;
+  activePage: Extract<SettingsPageKey, "application" | "general" | "theme" | "shortcuts">;
   themeMode: ThemeMode;
   systemPrefersDark: boolean;
   onThemeModeChange: (mode: ThemeMode) => void;
@@ -28,17 +28,15 @@ export function ApplicationSettingsPanel({
         padding: "20px",
       }}
     >
-      {activePage === "general" ? (
-        <LanguageSettingsSection />
-      ) : activePage === "theme" ? (
+      {(activePage === "application" || activePage === "general") && <LanguageSettingsSection />}
+      {(activePage === "application" || activePage === "theme") && (
         <ThemeSettingsSection
           themeMode={themeMode}
           systemPrefersDark={systemPrefersDark}
           onThemeModeChange={onThemeModeChange}
         />
-      ) : (
-        <ShortcutSettingsSection />
       )}
+      {(activePage === "application" || activePage === "shortcuts") && <ShortcutSettingsSection />}
     </div>
   );
 }

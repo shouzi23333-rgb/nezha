@@ -2,10 +2,11 @@ import type { SendShortcut } from "../../shortcuts";
 
 export type NavKey = "application" | "agents" | "about";
 export type SettingsPageKey =
+  | "application"
   | "general"
   | "theme"
   | "shortcuts"
-  | "agent-paths"
+  | "agents"
   | "claude"
   | "codex"
   | "about";
