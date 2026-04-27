@@ -18,6 +18,7 @@ export const appSettingsSectionTitleStyle: CSSProperties = {
   fontSize: 12,
   fontWeight: 700,
   color: "var(--text-primary)",
+  margin: 0,
   marginBottom: 12,
 };
 
